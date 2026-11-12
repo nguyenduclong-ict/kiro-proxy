@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kiro Proxy</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">kiro-proxy <span class="muted" id="endpoint"></span></div>
+    <nav id="tabs">
+      <button data-tab="keys" class="active">Keys</button>
+      <button data-tab="stats">Thống kê</button>
+      <button data-tab="logs">Logs</button>
+      <button data-tab="settings">Cài đặt</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-keys" class="tab active">
+      <form id="add-key" class="card row">
+        <input name="label" placeholder="Nhãn (tuỳ chọn)" maxlength="80">
+        <input name="apiKey" placeholder="Kiro API key" required autocomplete="off" type="password">
+        <button type="submit">Thêm key</button>
+        <span class="msg" id="add-key-msg"></span>
+      </form>
+      <div class="card">
+        <table class="grid" id="keys-table">
+          <thead><tr><th>#</th><th>Nhãn</th><th>Key</th><th>Credit đã dùng</th><th>Trạng thái</th><th>Session (2h)</th><th>Dùng lần cuối</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-stats" class="tab">
+      <div class="row">
+        <select id="range"><option value="24h">24 giờ</option><option value="7d">7 ngày</option><option value="30d">30 ngày</option></select>
+        <span class="muted small" id="stats-note"></span>
+      </div>
+      <div class="tiles" id="tiles"></div>
+      <div class="card"><h3>Credit và request theo thời gian</h3><div class="chart"><canvas id="chart-credits"></canvas></div></div>
+      <div class="two">
+        <div class="card"><h3>Theo key</h3><table class="grid" id="by-key"></table></div>
+        <div class="card"><h3>Theo model</h3><table class="grid" id="by-model"></table></div>
+      </div>
+      <div class="card"><h3>Session tốn nhiều credit nhất</h3><table class="grid" id="top-sessions"></table></div>
+    </section>
+
+    <section id="tab-logs" class="tab">
+      <div class="row">
+        <select id="f-status"><option value="">Mọi trạng thái</option><option>ok</option><option>error</option><option>aborted</option></select>
+        <select id="f-key"><option value="">Mọi key</option></select>
+        <input id="f-model" placeholder="model">
+        <input id="f-session" placeholder="session id">
+        <label class="small"><input type="checkbox" id="f-auto" checked> tự làm mới 5s</label>
+      </div>
+      <div class="card scroll">
+        <table class="grid" id="logs-table">
+          <thead><tr><th>Thời gian</th><th>Trạng thái</th><th>Model</th><th>Key</th><th>Credit</th><th>Input ước lượng</th><th>Credit/1M</th><th>Prefix</th><th>Thời gian chạy</th><th>Session</th><th>Lỗi</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="row pager"><button id="prev">‹ Trước</button><span id="page-info" class="muted"></span><button id="next">Sau ›</button></div>
+      <dialog id="detail"><form method="dialog"><button class="close">Đóng</button></form><pre id="detail-body"></pre></dialog>
+    </section>
+
+    <section id="tab-settings" class="tab">
+      <form id="settings-form" class="card form">
+        <h3>Xoay key</h3>
+        <label><input type="radio" name="rotation" value="sticky"> Round robin theo session (giữ cache, khuyên dùng)</label>
+        <label><input type="radio" name="rotation" value="per_request"> Round robin mỗi request (mỗi key phải tự dựng cache, tốn credit hơn)</label>
+        <h3>Logs</h3>
+        <label><input type="checkbox" name="capture_bodies"> Lưu body request/response (một request Claude Code có thể nặng vài MB)</label>
+        <label>Giữ body <input type="number" name="body_retention_days" min="1" max="90"> ngày</label>
+        <label>Giữ logs <input type="number" name="log_retention_days" min="1" max="365"> ngày</label>
+        <h3>Ước lượng cache</h3>
+        <label>Ngưỡng cache hit: credit / 1M token / rateMultiplier &lt; <input type="number" name="cache_hit_threshold" step="0.1" min="0.1"></label>
+        <p class="muted small">Đo được: hit ≈ 1.65, miss ≈ 6.15 (sau khi chia rateMultiplier của model).</p>
+        <h3>Context window ghi đè (JSON)</h3>
+        <textarea name="context_window_overrides" rows="3" placeholder='{"claude-opus-5.5": 1000000}'></textarea>
+        <div class="row"><button type="submit">Lưu</button><span class="msg" id="settings-msg"></span></div>
+      </form>
+      <div class="card form">
+        <h3>Cấu hình Claude Code</h3>
+        <p class="muted small">Thêm vào <code>~/.claude/settings.json</code> (mục <code>env</code>), rồi mở session Claude Code mới.</p>
+        <label class="small muted">Proxy token (ANTHROPIC_AUTH_TOKEN)</label>
+        <div class="row"><code id="proxy-token" class="token"></code><button id="copy-token" type="button">Copy token</button></div>
+        <pre id="cc-config"></pre>
+        <div class="row"><button id="copy-config" type="button">Copy cấu hình</button></div>
+      </div>
+      <div class="card form">
+        <h3>Model từ Kiro</h3>
+        <div class="row"><button id="refresh-models" type="button">Làm mới</button><span class="muted small" id="models-at"></span></div>
+        <table class="grid" id="models-table"></table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/vendor/chart.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

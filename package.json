@@ -1,0 +1,19 @@
+{
+  "name": "kiro-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Anthropic Messages API proxy for Kiro API keys, with key rotation, stats and logs",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "@fastify/static": "10.1.10",
+    "chart.js": "4.6.1",
+    "fastify": "5.12.8"
+  }
+}

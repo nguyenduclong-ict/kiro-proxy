@@ -1,0 +1,19 @@
+services:
+  kiro-proxy:
+    build: .
+    image: kiro-proxy:local
+    container_name: kiro-proxy
+    restart: unless-stopped
+    init: true
+    ports:
+      # Bound to localhost only: the dashboard has no login.
+      - "127.0.0.1:20197:20197"
+    volumes:
+      # SQLite DB (keys, proxy token, logs). Reuses the DB from running with `npm start`.
+      - ./data:/app/data
+    env_file:
+      # KIRO_API_KEY here is imported only when the DB has no key yet.
+      - path: .env
+        required: false
+    environment:
+      LOG_LEVEL: info
