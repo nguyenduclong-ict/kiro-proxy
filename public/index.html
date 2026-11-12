@@ -26,10 +26,11 @@
         <span class="msg" id="add-key-msg"></span>
       </form>
       <div class="card">
-        <table class="grid" id="keys-table">
+        <p class="muted small note" id="keys-usage-note"></p>
+        <div class="scroll"><table class="grid" id="keys-table">
           <thead><tr><th>#</th><th>Nhãn</th><th>Key</th><th>Credit đã dùng</th><th>Trạng thái</th><th>Session (2h)</th><th>Dùng lần cuối</th><th></th></tr></thead>
           <tbody></tbody>
-        </table>
+        </table></div>
       </div>
     </section>
 
@@ -41,10 +42,10 @@
       <div class="tiles" id="tiles"></div>
       <div class="card"><h3>Credit và request theo thời gian</h3><div class="chart"><canvas id="chart-credits"></canvas></div></div>
       <div class="two">
-        <div class="card"><h3>Theo key</h3><table class="grid" id="by-key"></table></div>
-        <div class="card"><h3>Theo model</h3><table class="grid" id="by-model"></table></div>
+        <div class="card"><h3>Theo key</h3><div class="scroll"><table class="grid" id="by-key"></table></div></div>
+        <div class="card"><h3>Theo model</h3><div class="scroll"><table class="grid" id="by-model"></table></div></div>
       </div>
-      <div class="card"><h3>Session tốn nhiều credit nhất</h3><table class="grid" id="top-sessions"></table></div>
+      <div class="card"><h3>Session tốn nhiều credit nhất</h3><div class="scroll"><table class="grid" id="top-sessions"></table></div></div>
     </section>
 
     <section id="tab-logs" class="tab">

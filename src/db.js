@@ -229,7 +229,10 @@ export class Store {
       COALESCE(SUM(est_output_tokens), 0) AS output_tokens,
       SUM(norm_rate IS NOT NULL AND norm_rate < :th) AS hits,
       SUM(norm_rate IS NOT NULL AND norm_rate >= :th) AS misses,
-      AVG(CASE WHEN status = 'ok' THEN latency_ms END) AS avg_latency`;
+      AVG(CASE WHEN status = 'ok' THEN latency_ms END) AS avg_latency,
+      AVG(CASE WHEN status = 'ok' AND stream = 1 THEN ttfb_ms END) AS avg_ttft,
+      AVG(CASE WHEN status = 'ok' AND stream = 1 AND est_output_tokens > 0 AND latency_ms > ttfb_ms
+               THEN est_output_tokens * 1000.0 / (latency_ms - ttfb_ms) END) AS avg_tps`;
     const p = { since, th: threshold };
     return {
       totals: this.q(`SELECT ${agg} FROM requests WHERE ts >= :since`).get(p),

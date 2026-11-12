@@ -54,7 +54,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; }
 .card h3 { margin: 0 0 10px; font-size: 14px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .card.row { margin-bottom: 14px; }
-.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 600px), 1fr)); gap: 14px; }
+.two > .card { min-width: 0; }
 .two .card { margin-bottom: 0; }
 .two + .card { margin-top: 14px; }
 .form label { display: block; margin: 6px 0; }
@@ -74,7 +75,11 @@ button.danger { color: var(--err); }
 .msg.ok { color: var(--ok); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
+.note { margin: 0 0 8px; }
+.note:empty { display: none; }
 .scroll { overflow-x: auto; }
+/* Nine stats columns need the extra 2px per cell to fit side-by-side cards without a scrollbar. */
+#tab-stats .scroll > table.grid th, #tab-stats .scroll > table.grid td { padding-left: 7px; padding-right: 7px; }
 table.grid { width: 100%; border-collapse: collapse; }
 .grid th, .grid td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .grid th { color: var(--muted); font-weight: 500; font-size: 12px; }

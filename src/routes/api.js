@@ -23,6 +23,10 @@ function publicKey(k, sessions) {
 
 const RANGES = { '24h': [86_400_000, 'hour'], '7d': [7 * 86_400_000, 'day'], '30d': [30 * 86_400_000, 'day'] };
 
+// The Keys screen asks for fresh credit each time it opens. Kiro's usage endpoint is
+// rate limited, so a key checked this recently is served from cache instead.
+const USAGE_MIN_REFRESH_MS = 60_000;
+
 export function registerApiRoutes(app, { store, refreshKeyUsage, refreshModels }) {
   // The dashboard has no login. It is reachable only on 127.0.0.1; these checks stop other
   // websites from driving it through the browser (DNS rebinding, cross-site POST).
@@ -46,6 +50,14 @@ export function registerApiRoutes(app, { store, refreshKeyUsage, refreshModels }
   };
 
   app.get('/api/keys', async () => keyList());
+
+  app.post('/api/keys/usage', async () => {
+    const now = Date.now();
+    const stale = store.listKeys().filter((k) => k.enabled
+      && !(k.usage_checked_at && now - k.usage_checked_at < USAGE_MIN_REFRESH_MS));
+    await Promise.all(stale.map((k) => refreshKeyUsage(k)));
+    return keyList();
+  });
 
   app.post('/api/keys', async (req, reply) => {
     const apiKey = String(req.body?.apiKey || '').trim();

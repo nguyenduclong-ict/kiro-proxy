@@ -49,8 +49,7 @@ $('#endpoint').textContent = `· ${location.host}`;
 
 // ---------- keys ----------
 let keysCache = [];
-loaders.keys = async () => {
-  keysCache = await api('/api/keys');
+function renderKeys() {
   const tb = $('#keys-table tbody');
   if (!keysCache.length) {
     tb.innerHTML = '<tr><td colspan="8" class="muted">Chưa có key nào.</td></tr>';
@@ -81,6 +80,31 @@ loaders.keys = async () => {
         <button class="small danger" data-act="delete">Xoá</button>
       </td></tr>`;
   }).join('');
+}
+
+// Kiro only returns credit when asked. Refreshing on every visit to the Keys tab keeps
+// the numbers current; the server skips keys it checked less than a minute ago.
+let usageRefresh = null;
+function loadKeysUsage() {
+  if (usageRefresh || !keysCache.some((k) => k.enabled)) return usageRefresh;
+  const note = $('#keys-usage-note');
+  note.textContent = 'Đang cập nhật credit…';
+  usageRefresh = api('/api/keys/usage', { method: 'POST', body: {} })
+    .then((list) => {
+      keysCache = list;
+      renderKeys();
+      const at = Math.max(0, ...list.map((k) => k.usage_checked_at || 0));
+      note.textContent = at ? `Credit cập nhật ${ago(at)}` : '';
+    })
+    .catch((err) => { note.textContent = `Không cập nhật được credit: ${err.message}`; })
+    .finally(() => { usageRefresh = null; });
+  return usageRefresh;
+}
+
+loaders.keys = async () => {
+  keysCache = await api('/api/keys');
+  renderKeys();
+  loadKeysUsage();
 };
 
 $('#keys-table').addEventListener('click', async (e) => {
@@ -135,12 +159,14 @@ let chart;
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const hitRate = (r) => (r.hits + r.misses ? `${fmt((100 * r.hits) / (r.hits + r.misses))}%` : '–');
 const perM = (r) => (r.input_tokens ? fmt(r.credits / (r.input_tokens / 1e6), 2) : '–');
+const fmtMs = (ms) => (ms == null || Number.isNaN(Number(ms)) ? '–' : ms < 1000 ? `${fmt(ms)} ms` : `${fmt(ms / 1000, 1)}s`);
+const fmtTps = (v) => (v == null ? '–' : `${fmt(v, 1)} tok/s`);
 
 function aggTable(el, rows, firstCol, firstLabel) {
-  el.innerHTML = `<thead><tr><th>${firstLabel}</th><th class="num">Request</th><th class="num">Lỗi</th><th class="num">Credit</th><th class="num">Input</th><th class="num">Credit/1M</th><th class="num">Cache hit</th></tr></thead><tbody>${
+  el.innerHTML = `<thead><tr><th>${firstLabel}</th><th class="num">Request</th><th class="num">Lỗi</th><th class="num">Credit</th><th class="num">Input</th><th class="num">Credit/1M</th><th class="num">Cache hit</th><th class="num" title="Thời gian tới token đầu">TTFT</th><th class="num" title="Output token mỗi giây">TPS</th></tr></thead><tbody>${
     rows.length
-      ? rows.map((r) => `<tr><td>${firstCol(r)}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.errors)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.input_tokens)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td></tr>`).join('')
-      : '<tr><td colspan="7" class="muted">Chưa có dữ liệu.</td></tr>'
+      ? rows.map((r) => `<tr><td>${firstCol(r)}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.errors)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.input_tokens)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td class="num">${fmtMs(r.avg_ttft)}</td><td class="num">${fmtTps(r.avg_tps)}</td></tr>`).join('')
+      : '<tr><td colspan="9" class="muted">Chưa có dữ liệu.</td></tr>'
   }</tbody>`;
 }
 
@@ -148,7 +174,7 @@ loaders.stats = async () => {
   const range = $('#range').value;
   const s = await api(`/api/stats?range=${range}`);
   const t = s.totals;
-  $('#stats-note').textContent = `Cache hit ước lượng: credit/1M token/rateMultiplier < ${s.threshold}. Kiro không trả số token cache, chỉ trả credit và % context.`;
+  $('#stats-note').textContent = `Cache hit ước lượng: credit/1M token/rateMultiplier < ${s.threshold}. Kiro không trả số token cache, chỉ trả credit và % context. TTFT: thời gian tới token đầu của request stream. TPS: output token ước lượng mỗi giây sinh của request stream.`;
   $('#tiles').innerHTML = [
     ['Credit', fmt(t.credits, 2)],
     ['Request', fmt(t.requests)],
@@ -158,6 +184,8 @@ loaders.stats = async () => {
     ['Credit / 1M input', perM(t)],
     ['Cache hit ước lượng', hitRate(t)],
     ['Độ trễ TB', t.avg_latency ? `${fmt(t.avg_latency / 1000, 1)}s` : '–'],
+    ['TTFT trung bình', fmtMs(t.avg_ttft)],
+    ['TPS trung bình', fmtTps(t.avg_tps)],
   ].map(([l, v]) => `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
 
   const labels = s.series.map((r) => r.bucket);
@@ -195,10 +223,10 @@ loaders.stats = async () => {
 
   aggTable($('#by-key'), s.byKey, (r) => esc(r.label || `#${r.key_id ?? '–'}`), 'Key');
   aggTable($('#by-model'), s.byModel, (r) => esc(r.model), 'Model');
-  $('#top-sessions').innerHTML = `<thead><tr><th>Session</th><th class="num">Request</th><th class="num">Credit</th><th class="num">Context lớn nhất</th><th class="num">Credit/1M</th><th class="num">Cache hit</th><th>Lần cuối</th></tr></thead><tbody>${
+  $('#top-sessions').innerHTML = `<thead><tr><th>Session</th><th class="num">Request</th><th class="num">Credit</th><th class="num">Context lớn nhất</th><th class="num">Credit/1M</th><th class="num">Cache hit</th><th class="num" title="Thời gian tới token đầu">TTFT</th><th class="num" title="Output token mỗi giây">TPS</th><th>Lần cuối</th></tr></thead><tbody>${
     s.topSessions.length
-      ? s.topSessions.map((r) => `<tr class="click" data-session="${esc(r.session_id)}"><td class="mono">${esc(r.session_id.slice(0, 18))}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.max_input)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td>${ago(r.last_ts)}</td></tr>`).join('')
-      : '<tr><td colspan="7" class="muted">Chưa có dữ liệu.</td></tr>'
+      ? s.topSessions.map((r) => `<tr class="click" data-session="${esc(r.session_id)}"><td class="mono">${esc(r.session_id.slice(0, 18))}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.max_input)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td class="num">${fmtMs(r.avg_ttft)}</td><td class="num">${fmtTps(r.avg_tps)}</td><td>${ago(r.last_ts)}</td></tr>`).join('')
+      : '<tr><td colspan="9" class="muted">Chưa có dữ liệu.</td></tr>'
   }</tbody>`;
 };
 $('#range').addEventListener('change', () => loaders.stats());
