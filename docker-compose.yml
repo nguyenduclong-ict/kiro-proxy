@@ -7,7 +7,7 @@ services:
     init: true
     ports:
       # Bound to localhost only: the dashboard has no login.
-      - "127.0.0.1:20197:20197"
+      - "20197:20197"
     volumes:
       # SQLite DB (keys, proxy token, logs). Reuses the DB from running with `npm start`.
       - ./data:/app/data
