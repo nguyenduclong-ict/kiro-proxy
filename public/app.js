@@ -162,17 +162,30 @@ const perM = (r) => (r.input_tokens ? fmt(r.credits / (r.input_tokens / 1e6), 2)
 const fmtMs = (ms) => (ms == null || Number.isNaN(Number(ms)) ? '–' : ms < 1000 ? `${fmt(ms)} ms` : `${fmt(ms / 1000, 1)}s`);
 const fmtTps = (v) => (v == null ? '–' : `${fmt(v, 1)} tok/s`);
 
-function aggTable(el, rows, firstCol, firstLabel) {
+function aggTable(el, rows, firstCol, firstLabel, rowAttrs = () => '') {
   el.innerHTML = `<thead><tr><th>${firstLabel}</th><th class="num">Request</th><th class="num">Lỗi</th><th class="num">Credit</th><th class="num">Input</th><th class="num">Credit/1M</th><th class="num">Cache hit</th><th class="num" title="Thời gian tới token đầu">TTFT</th><th class="num" title="Output token mỗi giây">TPS</th></tr></thead><tbody>${
     rows.length
-      ? rows.map((r) => `<tr><td>${firstCol(r)}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.errors)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.input_tokens)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td class="num">${fmtMs(r.avg_ttft)}</td><td class="num">${fmtTps(r.avg_tps)}</td></tr>`).join('')
+      ? rows.map((r) => `<tr ${rowAttrs(r)}><td>${firstCol(r)}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.errors)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.input_tokens)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td class="num">${fmtMs(r.avg_ttft)}</td><td class="num">${fmtTps(r.avg_tps)}</td></tr>`).join('')
       : '<tr><td colspan="9" class="muted">Chưa có dữ liệu.</td></tr>'
   }</tbody>`;
 }
 
 loaders.stats = async () => {
   const range = $('#range').value;
-  const s = await api(`/api/stats?range=${range}`);
+  const model = $('#stats-model').value;
+  const qs = new URLSearchParams({ range });
+  if (model) qs.set('model', model);
+  const s = await api(`/api/stats?${qs}`);
+
+  const modelSel = $('#stats-model');
+  const selectedModel = modelSel.value;
+  const models = s.models || [];
+  if (modelSel.dataset.loadedModels !== models.join(',')) {
+    modelSel.innerHTML = '<option value="">Mọi model</option>' + models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    modelSel.dataset.loadedModels = models.join(',');
+    modelSel.value = selectedModel;
+  }
+
   const t = s.totals;
   $('#stats-note').textContent = `Cache hit ước lượng: credit/1M token/rateMultiplier < ${s.threshold}. Kiro không trả số token cache, chỉ trả credit và % context. TTFT: thời gian tới token đầu của request stream. TPS: output token ước lượng mỗi giây sinh của request stream.`;
   $('#tiles').innerHTML = [
@@ -222,7 +235,7 @@ loaders.stats = async () => {
   }
 
   aggTable($('#by-key'), s.byKey, (r) => esc(r.label || `#${r.key_id ?? '–'}`), 'Key');
-  aggTable($('#by-model'), s.byModel, (r) => esc(r.model), 'Model');
+  aggTable($('#by-model'), s.byModel, (r) => esc(r.model), 'Model', (r) => (r.model ? `data-model="${esc(r.model)}" class="click"` : ''));
   $('#top-sessions').innerHTML = `<thead><tr><th>Session</th><th class="num">Request</th><th class="num">Credit</th><th class="num">Context lớn nhất</th><th class="num">Credit/1M</th><th class="num">Cache hit</th><th class="num" title="Thời gian tới token đầu">TTFT</th><th class="num" title="Output token mỗi giây">TPS</th><th>Lần cuối</th></tr></thead><tbody>${
     s.topSessions.length
       ? s.topSessions.map((r) => `<tr class="click" data-session="${esc(r.session_id)}"><td class="mono">${esc(r.session_id.slice(0, 18))}</td><td class="num">${fmt(r.requests)}</td><td class="num">${fmt(r.credits, 2)}</td><td class="num">${fmtTok(r.max_input)}</td><td class="num">${perM(r)}</td><td class="num">${hitRate(r)}</td><td class="num">${fmtMs(r.avg_ttft)}</td><td class="num">${fmtTps(r.avg_tps)}</td><td>${ago(r.last_ts)}</td></tr>`).join('')
@@ -230,6 +243,15 @@ loaders.stats = async () => {
   }</tbody>`;
 };
 $('#range').addEventListener('change', () => loaders.stats());
+$('#stats-model').addEventListener('change', () => loaders.stats());
+$('#by-model').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-model]');
+  if (!tr) return;
+  const m = tr.dataset.model;
+  const sel = $('#stats-model');
+  sel.value = sel.value === m ? '' : m;
+  loaders.stats();
+});
 $('#top-sessions').addEventListener('click', (e) => {
   const tr = e.target.closest('tr[data-session]');
   if (!tr) return;
@@ -328,6 +350,9 @@ loaders.settings = async () => {
   f.capture_bodies.checked = s.capture_bodies;
   f.body_retention_days.value = s.body_retention_days;
   f.log_retention_days.value = s.log_retention_days;
+  f.rate_limit_retries.value = s.rate_limit_retries ?? 5;
+  f.rate_limit_base_delay_ms.value = s.rate_limit_base_delay_ms ?? 2000;
+  f.rate_limit_max_delay_ms.value = s.rate_limit_max_delay_ms ?? 30000;
   f.cache_hit_threshold.value = s.cache_hit_threshold;
   f.context_window_overrides.value = Object.keys(s.context_window_overrides || {}).length ? JSON.stringify(s.context_window_overrides) : '';
   $('#models-at').textContent = models?.at ? `cập nhật ${ago(models.at)}` : '';
@@ -356,6 +381,9 @@ $('#settings-form').addEventListener('submit', async (e) => {
         log_retention_days: Number(f.log_retention_days.value),
         cache_hit_threshold: Number(f.cache_hit_threshold.value),
         context_window_overrides: overrides,
+        rate_limit_retries: Number(f.rate_limit_retries.value),
+        rate_limit_base_delay_ms: Number(f.rate_limit_base_delay_ms.value),
+        rate_limit_max_delay_ms: Number(f.rate_limit_max_delay_ms.value),
       },
     });
     setMsg(msg, 'Đã lưu.', true);

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase, Store } from '../src/db.js';
-import { classifyUpstreamError, KeyPool } from '../src/keys.js';
+import { calculateRetryDelay, classifyUpstreamError, KeyPool } from '../src/keys.js';
 
 function setup(n = 3) {
   const store = new Store(openDatabase(':memory:'));
@@ -66,4 +66,26 @@ test('error classification', () => {
   assert.equal(classifyUpstreamError(403, 'Invalid token').kind, 'auth');
   assert.equal(classifyUpstreamError(400, 'Improperly formed request').kind, 'request');
   assert.equal(classifyUpstreamError(503).kind, 'upstream');
+});
+
+test('calculateRetryDelay: exponential backoff, max delay, and retry-after', () => {
+  const zeroJitter = () => 0;
+  // Exponential backoff
+  assert.equal(calculateRetryDelay({ attempt: 0, baseDelayMs: 2000, random: zeroJitter }), 2000);
+  assert.equal(calculateRetryDelay({ attempt: 1, baseDelayMs: 2000, random: zeroJitter }), 4000);
+  assert.equal(calculateRetryDelay({ attempt: 2, baseDelayMs: 2000, random: zeroJitter }), 8000);
+  assert.equal(calculateRetryDelay({ attempt: 3, baseDelayMs: 2000, random: zeroJitter }), 16000);
+
+  // Caps at maxDelayMs
+  assert.equal(calculateRetryDelay({ attempt: 4, baseDelayMs: 2000, maxDelayMs: 30000, random: zeroJitter }), 30000);
+  assert.equal(calculateRetryDelay({ attempt: 10, baseDelayMs: 2000, maxDelayMs: 30000, random: zeroJitter }), 30000);
+
+  // Honors retry-after in seconds
+  assert.equal(calculateRetryDelay({ attempt: 0, baseDelayMs: 2000, retryAfter: '15', random: zeroJitter }), 15000);
+  // Respects maxDelayMs even if retry-after is higher
+  assert.equal(calculateRetryDelay({ attempt: 0, baseDelayMs: 2000, maxDelayMs: 10000, retryAfter: '30', random: zeroJitter }), 10000);
+
+  // Jitter is applied when random > 0
+  const delayWithJitter = calculateRetryDelay({ attempt: 0, baseDelayMs: 2000, random: () => 0.5 });
+  assert.ok(delayWithJitter > 2000 && delayWithJitter <= 2500);
 });

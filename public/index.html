@@ -37,6 +37,7 @@
     <section id="tab-stats" class="tab">
       <div class="row">
         <select id="range"><option value="24h">24 giờ</option><option value="7d">7 ngày</option><option value="30d">30 ngày</option></select>
+        <select id="stats-model"><option value="">Mọi model</option></select>
         <span class="muted small" id="stats-note"></span>
       </div>
       <div class="tiles" id="tiles"></div>
@@ -75,6 +76,12 @@
         <label><input type="checkbox" name="capture_bodies"> Lưu body request/response (một request Claude Code có thể nặng vài MB)</label>
         <label>Giữ body <input type="number" name="body_retention_days" min="1" max="90"> ngày</label>
         <label>Giữ logs <input type="number" name="log_retention_days" min="1" max="365"> ngày</label>
+        <h3>Tự động thử lại khi bị Rate Limit (429)</h3>
+        <label>Số lần thử lại tối đa <input type="number" name="rate_limit_retries" min="0" max="20"></label>
+        <p class="muted small">0 để tắt tự động thử lại. Mặc định: 5 lần.</p>
+        <label>Thời gian chờ ban đầu (ms) <input type="number" name="rate_limit_base_delay_ms" min="100" max="60000" step="100"></label>
+        <label>Thời gian chờ tối đa mỗi lần (ms) <input type="number" name="rate_limit_max_delay_ms" min="1000" max="300000" step="500"></label>
+        <p class="muted small">Thời gian chờ tự động tăng dần (exponential backoff) trước khi trả lỗi 429 về client.</p>
         <h3>Ước lượng cache</h3>
         <label>Ngưỡng cache hit: credit / 1M token / rateMultiplier &lt; <input type="number" name="cache_hit_threshold" step="0.1" min="0.1"></label>
         <p class="muted small">Đo được: hit ≈ 1.65, miss ≈ 6.15 (sau khi chia rateMultiplier của model).</p>

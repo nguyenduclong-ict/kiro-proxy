@@ -34,6 +34,9 @@ export const DEFAULT_SETTINGS = {
   cache_hit_threshold: 4,
   context_window_overrides: {},
   default_context_window: 1_000_000,
+  rate_limit_retries: 5,
+  rate_limit_base_delay_ms: 2000,
+  rate_limit_max_delay_ms: 30000,
 };
 
 // Used until ListAvailableModels has been fetched with a real key.

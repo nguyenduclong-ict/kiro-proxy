@@ -107,8 +107,19 @@ export function registerApiRoutes(app, { store, refreshKeyUsage, refreshModels }
 
   app.get('/api/stats', async (req) => {
     const [span, bucket] = RANGES[req.query.range] || RANGES['24h'];
+    const model = String(req.query.model || '').trim();
     const settings = store.getSettings();
-    return { range: req.query.range || '24h', bucket, threshold: settings.cache_hit_threshold, ...store.stats({ since: Date.now() - span, bucket, threshold: settings.cache_hit_threshold }) };
+    return {
+      range: req.query.range || '24h',
+      bucket,
+      threshold: settings.cache_hit_threshold,
+      ...store.stats({
+        since: Date.now() - span,
+        bucket,
+        threshold: settings.cache_hit_threshold,
+        model: model || undefined,
+      }),
+    };
   });
 
   app.get('/api/logs', async (req) => {
@@ -145,7 +156,14 @@ export function registerApiRoutes(app, { store, refreshKeyUsage, refreshModels }
       else errors.push('rotation must be sticky or per_request');
     }
     if (b.capture_bodies !== undefined) store.setSetting('capture_bodies', Boolean(b.capture_bodies));
-    for (const [name, min, max] of [['body_retention_days', 1, 90], ['log_retention_days', 1, 365], ['cache_hit_threshold', 0.1, 100]]) {
+    for (const [name, min, max] of [
+      ['body_retention_days', 1, 90],
+      ['log_retention_days', 1, 365],
+      ['cache_hit_threshold', 0.1, 100],
+      ['rate_limit_retries', 0, 20],
+      ['rate_limit_base_delay_ms', 100, 60000],
+      ['rate_limit_max_delay_ms', 1000, 300000],
+    ]) {
       if (b[name] === undefined) continue;
       const n = Number(b[name]);
       if (Number.isFinite(n) && n >= min && n <= max) store.setSetting(name, n);

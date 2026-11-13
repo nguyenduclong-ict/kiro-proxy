@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import Fastify, { LogController } from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -128,4 +129,4 @@ async function main() {
   process.on('SIGTERM', stop);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

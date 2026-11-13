@@ -34,7 +34,8 @@ export async function callKiro({ apiKey, body, signal, endpoints = KIRO.endpoint
     }
     if (res.ok) return { ok: true, res, endpoint };
     const text = (await res.text().catch(() => '')).slice(0, 4000);
-    last = { ok: false, status: res.status, text, endpoint };
+    const retryAfter = res.headers.get('retry-after');
+    last = { ok: false, status: res.status, text, endpoint, retryAfter };
     if (res.status < 500) return last;
   }
   return last;

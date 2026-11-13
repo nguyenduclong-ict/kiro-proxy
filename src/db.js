@@ -92,7 +92,12 @@ function sqlValue(v) {
 export function openDatabase(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  try {
+    db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+  } catch {
+    db.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = NORMAL;');
+  }
   db.exec(SCHEMA);
   if (file !== ':memory:') {
     for (const f of [file, `${file}-wal`, `${file}-shm`]) {
@@ -218,7 +223,7 @@ export class Store {
   }
 
   // ---- stats ----
-  stats({ since, bucket, threshold }) {
+  stats({ since, bucket, threshold, model }) {
     const fmt = bucket === 'hour' ? '%Y-%m-%d %H:00' : '%Y-%m-%d';
     const agg = `COUNT(*) AS requests,
       SUM(status = 'ok') AS ok,
@@ -234,15 +239,25 @@ export class Store {
       AVG(CASE WHEN status = 'ok' AND stream = 1 AND est_output_tokens > 0 AND latency_ms > ttfb_ms
                THEN est_output_tokens * 1000.0 / (latency_ms - ttfb_ms) END) AS avg_tps`;
     const p = { since, th: threshold };
+    const modelFilter = model ? 'AND model = :model' : '';
+    const reqModelFilter = model ? 'AND r.model = :model' : '';
+    if (model) p.model = model;
+
+    const models = this.q('SELECT DISTINCT model FROM requests WHERE ts >= :since AND model IS NOT NULL ORDER BY model')
+      .all({ since })
+      .map((r) => r.model);
+
     return {
-      totals: this.q(`SELECT ${agg} FROM requests WHERE ts >= :since`).get(p),
+      models,
+      selectedModel: model || null,
+      totals: this.q(`SELECT ${agg} FROM requests WHERE ts >= :since ${modelFilter}`).get(p),
       series: this.q(`SELECT strftime('${fmt}', ts / 1000, 'unixepoch', 'localtime') AS bucket, ${agg}
-                      FROM requests WHERE ts >= :since GROUP BY bucket ORDER BY bucket`).all(p),
+                      FROM requests WHERE ts >= :since ${modelFilter} GROUP BY bucket ORDER BY bucket`).all(p),
       byKey: this.q(`SELECT r.key_id, k.label, ${agg} FROM requests r LEFT JOIN keys k ON k.id = r.key_id
-                     WHERE r.ts >= :since GROUP BY r.key_id ORDER BY credits DESC`).all(p),
-      byModel: this.q(`SELECT model, ${agg} FROM requests WHERE ts >= :since GROUP BY model ORDER BY credits DESC`).all(p),
+                     WHERE r.ts >= :since ${reqModelFilter} GROUP BY r.key_id ORDER BY credits DESC`).all(p),
+      byModel: this.q(`SELECT model, ${agg} FROM requests WHERE ts >= :since ${modelFilter} GROUP BY model ORDER BY credits DESC`).all(p),
       topSessions: this.q(`SELECT session_id, ${agg}, MAX(est_input_tokens) AS max_input, MAX(ts) AS last_ts
-                           FROM requests WHERE ts >= :since AND session_id IS NOT NULL
+                           FROM requests WHERE ts >= :since AND session_id IS NOT NULL ${modelFilter}
                            GROUP BY session_id ORDER BY credits DESC LIMIT 10`).all(p),
     };
   }

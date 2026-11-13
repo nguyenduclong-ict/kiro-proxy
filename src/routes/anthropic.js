@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { config, modelInfo, normalizeModel } from '../config.js';
-import { classifyUpstreamError } from '../keys.js';
+import { calculateRetryDelay, classifyUpstreamError } from '../keys.js';
 import { callKiro, statusForException } from '../kiro/client.js';
 import { EventStreamDecoder } from '../kiro/eventstream.js';
 import { resolveSessionId } from '../session.js';
@@ -59,51 +60,97 @@ export function registerAnthropicRoutes(app, { store, pool, tracker, recorder })
     const tried = new Set();
     const failovers = [];
     let lastErr = null;
-    const maxAttempts = Math.max(1, pool.enabledCount());
+    let totalAttempts = 0;
+    let rateLimitRetry = 0;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const key = pool.pick(sessionId, tried);
-      if (!key) break;
-      tried.add(key.id);
-      row.attempts = attempt + 1;
-      row.key_id = key.id;
+    const settings = store.getSettings();
+    const maxRetries = Number(settings.rate_limit_retries ?? 5);
+    const baseDelayMs = Number(settings.rate_limit_base_delay_ms ?? 2000);
+    const maxDelayMs = Number(settings.rate_limit_max_delay_ms ?? 30000);
 
-      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(config.upstreamTimeoutMs)]);
-      let r;
-      try {
-        r = await callKiro({ apiKey: key.api_key, body: built.json, signal });
-      } catch (err) {
+    retryLoop: while (true) {
+      const maxAttempts = Math.max(1, pool.enabledCount());
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const key = pool.pick(sessionId, tried);
+        if (!key) break;
+        tried.add(key.id);
+        totalAttempts++;
+        row.attempts = totalAttempts;
+        row.key_id = key.id;
+
+        const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(config.upstreamTimeoutMs)]);
+        let r;
+        try {
+          r = await callKiro({ apiKey: key.api_key, body: built.json, signal });
+        } catch (err) {
+          if (abort.signal.aborted) {
+            recorder.record({ ...row, status: 'aborted', latency_ms: Date.now() - t0, error: 'client closed before Kiro answered' }, capture());
+            return reply;
+          }
+          r = { ok: false, status: 0, text: `upstream timeout or network error: ${err.message}`, endpoint: null };
+        }
+        row.endpoint = r.endpoint ? new URL(r.endpoint).host : null;
+
+        if (!r.ok) {
+          const cls = classifyUpstreamError(r.status, r.text);
+          pool.reportFailure(key, cls, r.text);
+          lastErr = { status: r.status, text: r.text, cls, retryAfter: r.retryAfter };
+          if (cls.failover) {
+            failovers.push(`${key.id}:${cls.kind}`);
+            continue;
+          }
+          break retryLoop;
+        }
+
+        const out = await consume({ req, reply, res: r.res, key, row, built, info, t0, stream, clientModel, modelId, body, abort, capture, failovers });
+        if (out.retry) {
+          const cls = classifyUpstreamError(out.status, out.text);
+          pool.reportFailure(key, cls, out.text);
+          lastErr = { status: out.status, text: out.text, cls };
+          if (cls.failover) {
+            failovers.push(`${key.id}:${cls.kind}`);
+            continue;
+          }
+          break retryLoop;
+        }
+        return reply;
+      }
+
+      // Check if the failure was rate limit (429) and we still have retry budget
+      const isRateLimit = lastErr && (lastErr.status === 429 || lastErr.cls?.kind === 'rate_limit');
+      if (isRateLimit && rateLimitRetry < maxRetries && !abort.signal.aborted) {
+        const delay = calculateRetryDelay({
+          attempt: rateLimitRetry,
+          baseDelayMs,
+          maxDelayMs,
+          retryAfter: lastErr.retryAfter,
+        });
+        req.log.warn(
+          { attempt: rateLimitRetry + 1, maxRetries, delayMs: delay, model: modelId },
+          `Kiro 429 rate limit reached. Waiting ${delay}ms before retry ${rateLimitRetry + 1}/${maxRetries}...`,
+        );
+
+        try {
+          await sleep(delay, undefined, { signal: abort.signal });
+        } catch {
+          if (abort.signal.aborted) {
+            recorder.record({ ...row, status: 'aborted', latency_ms: Date.now() - t0, error: 'client closed while waiting for 429 retry' }, capture());
+            return reply;
+          }
+        }
+
         if (abort.signal.aborted) {
-          recorder.record({ ...row, status: 'aborted', latency_ms: Date.now() - t0, error: 'client closed before Kiro answered' }, capture());
+          recorder.record({ ...row, status: 'aborted', latency_ms: Date.now() - t0, error: 'client closed while waiting for 429 retry' }, capture());
           return reply;
         }
-        r = { ok: false, status: 0, text: `upstream timeout or network error: ${err.message}`, endpoint: null };
-      }
-      row.endpoint = r.endpoint ? new URL(r.endpoint).host : null;
 
-      if (!r.ok) {
-        const cls = classifyUpstreamError(r.status, r.text);
-        pool.reportFailure(key, cls, r.text);
-        lastErr = { status: r.status, text: r.text, cls };
-        if (cls.failover) {
-          failovers.push(`${key.id}:${cls.kind}`);
-          continue;
-        }
-        break;
+        rateLimitRetry++;
+        failovers.push(`retry_${rateLimitRetry}:429_wait_${Math.round(delay)}ms`);
+        tried.clear();
+        continue retryLoop;
       }
 
-      const out = await consume({ req, reply, res: r.res, key, row, built, info, t0, stream, clientModel, modelId, body, abort, capture, failovers });
-      if (out.retry) {
-        const cls = classifyUpstreamError(out.status, out.text);
-        pool.reportFailure(key, cls, out.text);
-        lastErr = { status: out.status, text: out.text, cls };
-        if (cls.failover) {
-          failovers.push(`${key.id}:${cls.kind}`);
-          continue;
-        }
-        break;
-      }
-      return reply;
+      break retryLoop;
     }
 
     row.failover_from = failovers.join(',') || null;

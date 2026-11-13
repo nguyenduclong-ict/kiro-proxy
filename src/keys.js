@@ -73,3 +73,32 @@ export function classifyUpstreamError(status, text = '') {
   if (status === 0 || status >= 500) return { kind: 'upstream', cooldownMs: 0, failover: true };
   return { kind: 'request', cooldownMs: 0, failover: false };
 }
+
+/**
+ * Calculates exponential backoff delay with jitter for rate limit (429) retries.
+ * Respects Retry-After header if provided.
+ */
+export function calculateRetryDelay({
+  attempt = 0,
+  baseDelayMs = 2000,
+  maxDelayMs = 30000,
+  retryAfter = null,
+  random = Math.random,
+} = {}) {
+  let delay = Math.min(maxDelayMs, Math.max(0, baseDelayMs * Math.pow(2, attempt)));
+  if (retryAfter) {
+    const sec = Number(retryAfter);
+    if (Number.isFinite(sec) && sec > 0) {
+      delay = Math.min(maxDelayMs, Math.max(delay, sec * 1000));
+    } else {
+      const parsed = Date.parse(retryAfter);
+      if (Number.isFinite(parsed)) {
+        const diff = parsed - Date.now();
+        if (diff > 0) delay = Math.min(maxDelayMs, Math.max(delay, diff));
+      }
+    }
+  }
+  const jitterRange = Math.min(1000, Math.max(100, delay * 0.2));
+  const jitter = Math.floor(random() * jitterRange);
+  return Math.min(maxDelayMs, delay + jitter);
+}
